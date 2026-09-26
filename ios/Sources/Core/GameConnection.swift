@@ -2,7 +2,9 @@ import Foundation
 #if canImport(Network)
 import Combine
 import Network
+#if canImport(UIKit)
 import UIKit
+#endif
 
 @MainActor
 public final class GameConnection: ObservableObject {
@@ -26,6 +28,7 @@ public final class GameConnection: ObservableObject {
                     self.isConnected = true
                     self.sendRaw(GameProtocolCodec.connectionRequest())
                     let uid = UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
+                    let uid = Self.deviceUID
                     self.sendRaw(GameProtocolCodec.deviceUID(uid))
                     self.sendRaw(GameProtocolCodec.deviceUID(uid, decades: true))
                     self.receive()
@@ -55,6 +58,14 @@ public final class GameConnection: ObservableObject {
 
     private func sendRaw(_ data: Data) {
         connection?.send(content: data, completion: .contentProcessed { _ in })
+    }
+
+    private static var deviceUID: String {
+#if canImport(UIKit)
+        UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
+#else
+        UUID().uuidString
+#endif
     }
 
     private func receive() {
