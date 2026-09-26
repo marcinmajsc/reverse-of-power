@@ -43,6 +43,7 @@ targets:
       - path: Sources/Core
     settings:
       base:
+        GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: com.game.reverseofpower.core
   ReverseOfPowerCoreTests:
     type: bundle.unit-test
