@@ -23,8 +23,11 @@ public enum GameProtocolCodec {
 
   public static func deviceUID(_ uid: String, decades: Bool = false) -> Data {
     let uidData = Data(uid.utf8)
-    var result = Data(decades ? [0x0c, 0x89, 0xe8, 0x85] : [0x0c, 0x89, 0xe8, 0x84])
-    result.append(contentsOf: [0x61, 0x03, 0xf4, 0x63])
+    var result = Data(
+      decades
+        ? [0xaf, 0xe4, 0x87, 0x3d, 0x82, 0xed, 0x6c, 0x47]
+        : [0x0c, 0x89, 0xe8, 0x84, 0x61, 0x03, 0xf4, 0x63]
+    )
     result.appendLE(Int32(uidData.count))
     result.append(uidData)
     return result

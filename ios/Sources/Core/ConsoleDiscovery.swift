@@ -83,19 +83,23 @@ public enum ConsoleDiscovery {
         return []
       }
 
-      for request in requests {
-        var destination = sockaddr_in()
-        destination.sin_family = sa_family_t(AF_INET)
-        destination.sin_port = request.port.bigEndian
-        destination.sin_addr = in_addr(s_addr: inet_addr("255.255.255.255"))
-        let payload = Data(
-          "SRCH * HTTP/1.1\ndevice-discovery-protocol-version:\(request.version)\n".utf8)
-        withUnsafePointer(to: &destination) { pointer in
-          pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
-            payload.withUnsafeBytes { bytes in
-              _ = sendto(
-                descriptor, bytes.baseAddress, bytes.count, 0, socketAddress,
-                socklen_t(MemoryLayout<sockaddr_in>.size))
+      // A limited broadcast is not routed over Wi-Fi on every iOS version. Send to
+      // each active interface's subnet broadcast as well, which is also how the
+      // Android client reliably reaches consoles on typical home networks.
+      for broadcastAddress in broadcastAddresses() {
+        for request in requests {
+          var destination = sockaddr_in()
+          destination.sin_family = sa_family_t(AF_INET)
+          destination.sin_port = request.port.bigEndian
+          destination.sin_addr = broadcastAddress
+          let payload = discoveryRequest(version: request.version)
+          withUnsafePointer(to: &destination) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
+              payload.withUnsafeBytes { bytes in
+                _ = sendto(
+                  descriptor, bytes.baseAddress, bytes.count, 0, socketAddress,
+                  socklen_t(MemoryLayout<sockaddr_in>.size))
+              }
             }
           }
         }
@@ -133,5 +137,38 @@ public enum ConsoleDiscovery {
     #else
       return []
     #endif
+  }
+
+  static func discoveryRequest(version: String) -> Data {
+    Data("SRCH * HTTP/1.1\ndevice-discovery-protocol-version:\(version)\n".utf8)
+  }
+
+  private static func broadcastAddresses() -> [in_addr] {
+    var result = [in_addr(s_addr: inet_addr("255.255.255.255"))]
+    var interfaces: UnsafeMutablePointer<ifaddrs>?
+    guard getifaddrs(&interfaces) == 0, let first = interfaces else { return result }
+    defer { freeifaddrs(interfaces) }
+
+    for pointer in sequence(first: first, next: { $0.pointee.ifa_next }) {
+      let interface = pointer.pointee
+      guard let address = interface.ifa_addr, let netmask = interface.ifa_netmask,
+        address.pointee.sa_family == sa_family_t(AF_INET),
+        interface.ifa_flags & UInt32(IFF_UP) != 0,
+        interface.ifa_flags & UInt32(IFF_BROADCAST) != 0,
+        interface.ifa_flags & UInt32(IFF_LOOPBACK) == 0
+      else { continue }
+
+      let ipv4 = address.withMemoryRebound(to: sockaddr_in.self, capacity: 1) {
+        $0.pointee.sin_addr.s_addr
+      }
+      let mask = netmask.withMemoryRebound(to: sockaddr_in.self, capacity: 1) {
+        $0.pointee.sin_addr.s_addr
+      }
+      let broadcast = in_addr(s_addr: (ipv4 & mask) | ~mask)
+      if !result.contains(where: { $0.s_addr == broadcast.s_addr }) {
+        result.append(broadcast)
+      }
+    }
+    return result
   }
 }

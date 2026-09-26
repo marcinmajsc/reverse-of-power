@@ -9,6 +9,18 @@ final class GameProtocolTests: XCTestCase {
     XCTAssertEqual(Array(data.prefix(6)), [0x8a, 0x33, 0xff, 0xff, 0xff, 0xff])
   }
 
+  func testDeviceUIDMatchesKnowledgeIsPowerWireFormat() {
+    let data = GameProtocolCodec.deviceUID("abc")
+    XCTAssertEqual(Array(data.prefix(8)), [0x0c, 0x89, 0xe8, 0x84, 0x61, 0x03, 0xf4, 0x63])
+    XCTAssertEqual(Array(data.suffix(3)), Array("abc".utf8))
+  }
+
+  func testDeviceUIDMatchesDecadesWireFormat() {
+    let data = GameProtocolCodec.deviceUID("abc", decades: true)
+    XCTAssertEqual(Array(data.prefix(8)), [0xaf, 0xe4, 0x87, 0x3d, 0x82, 0xed, 0x6c, 0x47])
+    XCTAssertEqual(Array(data.suffix(3)), Array("abc".utf8))
+  }
+
   func testJSONRoundTripPacket() throws {
     let packets = try GameProtocolCodec.encodeJSON(
       ["TypeString": "Test", "value": 42], messageID: 7)
@@ -59,5 +71,11 @@ extension GameProtocolTests {
   func testDiscoveryIgnoresMalformedResponse() {
     XCTAssertNil(
       ConsoleDiscovery.parseResponse(Data("not DDP".utf8), senderAddress: "192.168.1.50"))
+  }
+
+  func testDiscoveryRequestMatchesDDPWireFormat() {
+    XCTAssertEqual(
+      String(data: ConsoleDiscovery.discoveryRequest(version: "00020020"), encoding: .utf8),
+      "SRCH * HTTP/1.1\ndevice-discovery-protocol-version:00020020\n")
   }
 }
