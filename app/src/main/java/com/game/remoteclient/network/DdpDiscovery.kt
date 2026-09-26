@@ -32,18 +32,38 @@ object DdpDiscovery {
         context: Context,
         timeoutMs: Long = 3000
     ): List<PlayStationConsole> = withContext(Dispatchers.IO) {
-        val wifiBroadcast = getWifiBroadcastAddress(context)
-        if (wifiBroadcast != null) {
-            Log.d(TAG, "Trying WiFi broadcast: ${wifiBroadcast.hostAddress}")
-            val results = sendAndCollect(wifiBroadcast, timeoutMs)
-            if (results.isNotEmpty()) return@withContext results
-            Log.d(TAG, "No results from WiFi broadcast, falling back to 255.255.255.255")
-        } else {
-            Log.d(TAG, "Could not determine WiFi broadcast address, using 255.255.255.255")
-        }
+        val multicastLock = acquireMulticastLock(context)
+        try {
+            val wifiBroadcast = getWifiBroadcastAddress(context)
+            if (wifiBroadcast != null) {
+                Log.d(TAG, "Trying WiFi broadcast: ${wifiBroadcast.hostAddress}")
+                val results = sendAndCollect(wifiBroadcast, timeoutMs)
+                if (results.isNotEmpty()) return@withContext results
+                Log.d(TAG, "No results from WiFi broadcast, falling back to 255.255.255.255")
+            } else {
+                Log.d(TAG, "Could not determine WiFi broadcast address, using 255.255.255.255")
+            }
 
-        val globalBroadcast = InetAddress.getByName("255.255.255.255")
-        sendAndCollect(globalBroadcast, timeoutMs)
+            val globalBroadcast = InetAddress.getByName("255.255.255.255")
+            sendAndCollect(globalBroadcast, timeoutMs)
+        } finally {
+            if (multicastLock?.isHeld == true) multicastLock.release()
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun acquireMulticastLock(context: Context): WifiManager.MulticastLock? {
+        return try {
+            val wifiManager = context.applicationContext
+                .getSystemService(Context.WIFI_SERVICE) as? WifiManager ?: return null
+            wifiManager.createMulticastLock("reverse-of-power:discovery").apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not acquire multicast lock: ${e.message}")
+            null
+        }
     }
 
     private fun sendAndCollect(

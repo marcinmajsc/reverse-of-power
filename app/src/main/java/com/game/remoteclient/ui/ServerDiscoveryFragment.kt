@@ -9,10 +9,12 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.game.protocol.ClientHoldingScreenCommandMessage
+import com.game.protocol.RejoiningClientOwnProfileMessage
 import com.game.remoteclient.BuildConfig
+import com.game.remoteclient.GameRemoteClientApplication
 import com.game.remoteclient.R
 import com.game.remoteclient.databinding.FragmentServerDiscoveryBinding
-import com.game.remoteclient.GameRemoteClientApplication
 import com.game.remoteclient.models.GameServer
 import kotlinx.coroutines.launch
 
@@ -26,6 +28,16 @@ class ServerDiscoveryFragment : Fragment() {
 
     private var manualEntryExpanded = false
     private var navigated = false
+
+    private val rejoiningCallback: (RejoiningClientOwnProfileMessage) -> Unit = {
+        navigateOnce(R.id.action_serverDiscovery_to_holdingScreen)
+    }
+    private val holdingScreenCallback: (ClientHoldingScreenCommandMessage) -> Unit = {
+        navigateOnce(R.id.action_serverDiscovery_to_holdingScreen)
+    }
+    private val resetToNameEntryCallback: () -> Unit = {
+        navigateOnce(R.id.action_serverDiscovery_to_nameEntry)
+    }
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -134,23 +146,11 @@ class ServerDiscoveryFragment : Fragment() {
         binding.scanningText.text = getString(R.string.connecting_to_server)
         setServerOptionsVisible(false)
 
-        // Listen for rejoin — server sends this during handshake if we were previously connected
-        networkManager.onRejoining = { _ ->
-            activity?.runOnUiThread {
-                if (_binding == null || navigated) return@runOnUiThread
-                navigated = true
-                findNavController().navigate(R.id.action_serverDiscovery_to_holdingScreen)
-            }
-        }
-
-        // Listen for holding screen — game already in progress
-        networkManager.onHoldingScreenMessage = { _ ->
-            activity?.runOnUiThread {
-                if (_binding == null || navigated) return@runOnUiThread
-                navigated = true
-                findNavController().navigate(R.id.action_serverDiscovery_to_holdingScreen)
-            }
-        }
+        // The handshake finishes asynchronously after the UDP connection acknowledgement.
+        // Route each possible server state once its first game-state message arrives.
+        networkManager.onRejoining = rejoiningCallback
+        networkManager.onHoldingScreenMessage = holdingScreenCallback
+        networkManager.onResetToNameEntryInterceptor = resetToNameEntryCallback
 
         lifecycleScope.launch {
             try {
@@ -184,9 +184,23 @@ class ServerDiscoveryFragment : Fragment() {
         }
     }
 
+    private fun navigateOnce(actionId: Int) {
+        activity?.runOnUiThread {
+            if (_binding == null || navigated) return@runOnUiThread
+            navigated = true
+            clearCallbacks()
+            findNavController().navigate(actionId)
+        }
+    }
+
     private fun clearCallbacks() {
-        networkManager.onRejoining = null
-        networkManager.onHoldingScreenMessage = null
+        if (networkManager.onRejoining === rejoiningCallback) networkManager.onRejoining = null
+        if (networkManager.onHoldingScreenMessage === holdingScreenCallback) {
+            networkManager.onHoldingScreenMessage = null
+        }
+        if (networkManager.onResetToNameEntryInterceptor === resetToNameEntryCallback) {
+            networkManager.onResetToNameEntryInterceptor = null
+        }
     }
 
     override fun onDestroyView() {
