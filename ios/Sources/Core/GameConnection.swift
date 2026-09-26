@@ -19,21 +19,36 @@ public final class GameConnection: ObservableObject {
 
     public func connect(host: String, port: UInt16 = 9066) {
         disconnect()
-        let connection = NWConnection(host: NWEndpoint.Host(host), port: NWEndpoint.Port(rawValue: port)!, using: .udp)
+        errorMessage = nil
+
+        let address = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !address.isEmpty else {
+            errorMessage = "Wpisz adres IP konsoli."
+            return
+        }
+
+        let connection = NWConnection(host: NWEndpoint.Host(address), port: NWEndpoint.Port(rawValue: port)!, using: .udp)
         self.connection = connection
         connection.stateUpdateHandler = { [weak self] state in
             Task { @MainActor in
                 guard let self else { return }
-                if case .ready = state {
+                switch state {
+                case .ready:
+                    self.errorMessage = nil
                     self.isConnected = true
                     self.sendRaw(GameProtocolCodec.connectionRequest())
                     let uid = Self.deviceUID
                     self.sendRaw(GameProtocolCodec.deviceUID(uid))
                     self.sendRaw(GameProtocolCodec.deviceUID(uid, decades: true))
                     self.receive()
-                } else if case let .failed(error) = state {
+                case let .waiting(error):
+                    self.errorMessage = "Nie można uzyskać dostępu do sieci lokalnej: \(error.localizedDescription)"
+                    self.isConnected = false
+                case let .failed(error):
                     self.errorMessage = error.localizedDescription
                     self.isConnected = false
+                default:
+                    break
                 }
             }
         }
@@ -56,7 +71,12 @@ public final class GameConnection: ObservableObject {
     }
 
     private func sendRaw(_ data: Data) {
-        connection?.send(content: data, completion: .contentProcessed { _ in })
+        connection?.send(content: data, completion: .contentProcessed { [weak self] error in
+            guard let error else { return }
+            Task { @MainActor [weak self] in
+                self?.errorMessage = error.localizedDescription
+            }
+        })
     }
 
     private static var deviceUID: String {
