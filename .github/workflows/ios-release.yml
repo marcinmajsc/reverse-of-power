@@ -10,9 +10,21 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+
+      - name: Select Xcode 27
+        run: |
+          xcode_path="$(find /Applications -maxdepth 1 -type d -name 'Xcode_27*.app' -print | sort | tail -1)"
+          if [[ -z "$xcode_path" ]]; then
+            echo "Xcode 27 is required to build and validate against the iOS 27 SDK." >&2
+            exit 1
+          fi
+          sudo xcode-select --switch "$xcode_path/Contents/Developer"
+          xcodebuild -version
+          sdk_version="$(xcrun --sdk iphoneos --show-sdk-version)"
+          [[ "$sdk_version" == 27.* ]] || { echo "Selected iOS SDK is $sdk_version, expected 27.x." >&2; exit 1; }
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -43,7 +55,7 @@ jobs:
           /usr/bin/ditto -c -k --sequesterRsrc --keepParent Payload \
             "$GITHUB_WORKSPACE/ios/ReverseOfPower.ipa"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: ReverseOfPower-iOS
           path: ios/ReverseOfPower.ipa

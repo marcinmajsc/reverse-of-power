@@ -24,7 +24,11 @@ targets:
         NSCameraUsageDescription: Zdjęcie jest używane jako portret gracza.
         NSLocalNetworkUsageDescription: Aplikacja łączy się z grą PlayLink w sieci lokalnej.
         NSBonjourServices: ["_companion-link._udp"]
-        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.game.reverseofpower
