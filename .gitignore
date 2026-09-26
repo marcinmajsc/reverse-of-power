@@ -3,6 +3,9 @@
 *.aar
 *.ap_
 *.aab
+*.ipa
+ios/*.xcodeproj/
+ios/.build/
 
 # Files for the ART/Dalvik VM
 *.dex

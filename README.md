@@ -9,7 +9,7 @@ It speaks the game's local-network protocol directly: point it at a retail copy 
 Reverse of Power works with the retail party quiz title **Knowledge is Power** and its sequel **Knowledge is Power: Decades** (Decades support is a work in progress). You need a legitimately purchased copy of the game running on your own console — this app only stands in for the phone controller; it is not the game and contains none of the game.
 
 - PS4 and PS5 compatible
-- Android 8.0+
+- Android 8.0+ lub iOS 16+
 - Phone/tablet and console on the same Wi-Fi network
 
 ## Features
@@ -22,11 +22,23 @@ Reverse of Power works with the retail party quiz title **Knowledge is Power** a
 
 ## Getting Started
 
-[**Download the latest APK**](https://github.com/synchrone/reverse-of-power/releases/latest/download/app-release.apk) or see all versions on the [Releases](../../releases) page. You can also build from source with `./gradlew assembleDebug`.
+[**Download the latest APK**](https://github.com/synchrone/reverse-of-power/releases/latest/download/app-release.apk) or see all versions on the [Releases](../../releases) page. The release workflow also publishes a signed iOS `ipa` when its Apple signing secrets are configured. You can build Android from source with `./gradlew assembleDebug`.
 
 1. Install the APK on your Android device.
 2. Start the game on your PS4 or PS5.
 3. Open Reverse of Power on the same Wi-Fi network — it discovers the console automatically and connects.
+
+### iOS build
+
+The native SwiftUI client and its protocol library live in `ios/`. Generate the Xcode project with [XcodeGen](https://github.com/yonaskolb/XcodeGen), then build it:
+
+```bash
+cd ios
+xcodegen generate
+xcodebuild -project ReverseOfPower.xcodeproj -scheme ReverseOfPower -sdk iphonesimulator build
+```
+
+For an installable archive, configure the repository secrets `IOS_CERTIFICATE_BASE64`, `IOS_CERTIFICATE_PASSWORD`, `IOS_PROVISIONING_PROFILE_BASE64`, `IOS_DEVELOPMENT_TEAM`, and `IOS_PROVISIONING_PROFILE_NAME`, then run **Build iOS IPA** in GitHub Actions. The profile must use the `com.game.reverseofpower` bundle identifier. Secrets are only installed in a temporary keychain on the macOS runner.
 
 ## Known Limitations
 
