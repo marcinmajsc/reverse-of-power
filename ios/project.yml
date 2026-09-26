@@ -34,6 +34,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.game.reverseofpower
         CODE_SIGN_STYLE: Automatic
         TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_ENTITLEMENTS: Sources/App/ReverseOfPower.entitlements
     scheme:
       testTargets: [ReverseOfPowerCoreTests]
   ReverseOfPowerCore:
