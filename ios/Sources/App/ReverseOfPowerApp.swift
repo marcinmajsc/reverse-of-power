@@ -100,7 +100,7 @@ struct ContentView: View {
       TextField("Adres IP konsoli", text: $serverAddress)
         .textInputAutocapitalization(.never)
         .keyboardType(.numbersAndPunctuation)
-        .submitLabel(.connect)
+        .submitLabel(.go)
         .onSubmit { game.connect(host: serverAddress) }
         .padding()
         .background(.white.opacity(0.95), in: RoundedRectangle(cornerRadius: 14))
