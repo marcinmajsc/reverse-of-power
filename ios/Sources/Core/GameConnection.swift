@@ -27,7 +27,6 @@ public final class GameConnection: ObservableObject {
                 if case .ready = state {
                     self.isConnected = true
                     self.sendRaw(GameProtocolCodec.connectionRequest())
-                    let uid = UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
                     let uid = Self.deviceUID
                     self.sendRaw(GameProtocolCodec.deviceUID(uid))
                     self.sendRaw(GameProtocolCodec.deviceUID(uid, decades: true))
@@ -70,17 +69,19 @@ public final class GameConnection: ObservableObject {
 
     private func receive() {
         connection?.receiveMessage { [weak self] data, _, _, _ in
-            guard let self else { return }
-            if let data, let packet = try? GameProtocolCodec.decodePacket(data) {
-                self.sendRaw(GameProtocolCodec.acknowledgement(messageID: packet.messageID))
-                if packet.packetCount == 1, packet.payload.count >= 10 {
-                    let json = packet.payload.dropFirst(10)
-                    if let object = try? JSONSerialization.jsonObject(with: json) as? [String: Any] {
-                        Task { @MainActor in self.lastMessage = object }
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if let data, let packet = try? GameProtocolCodec.decodePacket(data) {
+                    self.sendRaw(GameProtocolCodec.acknowledgement(messageID: packet.messageID))
+                    if packet.packetCount == 1, packet.payload.count >= 10 {
+                        let json = packet.payload.dropFirst(10)
+                        if let object = try? JSONSerialization.jsonObject(with: json) as? [String: Any] {
+                            self.lastMessage = object
+                        }
                     }
                 }
+                self.receive()
             }
-            self.receive()
         }
     }
 }
