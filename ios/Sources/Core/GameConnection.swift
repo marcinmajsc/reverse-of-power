@@ -20,10 +20,14 @@ import Foundation
     private var readinessTask: Task<Void, Never>?
     private var outgoingReady = false
     private var listenerReady = false
+    private var protocolVariant = GameProtocolVariant.knowledgeIsPower
     private var messageID: Int32 = 1
+    private let deviceUID: String
     private let queue = DispatchQueue(label: "reverse-of-power.udp")
 
-    public init() {}
+    public init() {
+      deviceUID = Self.makeDeviceUID()
+    }
 
     public func connect(host: String, port: UInt16 = 9066) {
       disconnect()
@@ -96,7 +100,7 @@ import Foundation
       isConnecting = true
       connection.stateUpdateHandler = { [weak self, weak connection] state in
         Task { @MainActor in
-          guard let self, connection === self.connection else { return }
+          guard let self, let connection, connection === self.connection else { return }
           switch state {
           case .ready:
             self.outgoingReady = true
@@ -147,6 +151,7 @@ import Foundation
       inboundConnections.removeAll()
       outgoingReady = false
       listenerReady = false
+      protocolVariant = .knowledgeIsPower
       isConnecting = false
       isConnected = false
     }
@@ -159,7 +164,9 @@ import Foundation
       var value = fields
       value["TypeString"] = type
       do {
-        for packet in try GameProtocolCodec.encodeJSON(value, messageID: messageID) {
+        for packet in try GameProtocolCodec.encodeJSON(
+          value, messageID: messageID, variant: protocolVariant)
+        {
           sendRaw(packet)
         }
         messageID &+= 1
@@ -175,12 +182,11 @@ import Foundation
       handshakeTask?.cancel()
       handshakeTask = Task { [weak self] in
         guard let self else { return }
-        let uid = Self.deviceUID
         for _ in 0..<6 {
           guard !Task.isCancelled, self.isConnecting else { return }
           self.sendRaw(GameProtocolCodec.connectionRequest())
-          self.sendRaw(GameProtocolCodec.deviceUID(uid))
-          self.sendRaw(GameProtocolCodec.deviceUID(uid, decades: true))
+          self.sendRaw(GameProtocolCodec.deviceUID(self.deviceUID))
+          self.sendRaw(GameProtocolCodec.deviceUID(self.deviceUID, decades: true))
           try? await Task.sleep(for: .seconds(1))
         }
         guard !Task.isCancelled, self.isConnecting else { return }
@@ -212,7 +218,7 @@ import Foundation
         })
     }
 
-    private static var deviceUID: String {
+    private static func makeDeviceUID() -> String {
       #if canImport(UIKit)
         UIDevice.current.identifierForVendor?.uuidString.replacingOccurrences(of: "-", with: "")
           ?? UUID().uuidString
@@ -236,15 +242,19 @@ import Foundation
             return
           }
           if let data {
-            if GameProtocolCodec.isConnectionAcknowledgement(data) {
-              self.completeHandshake()
-            } else if let packet = try? GameProtocolCodec.decodePacket(data) {
+            // A connection acknowledgement is protocol-neutral. Wait for the first
+            // framed packet, whose magic selects Knowledge is Power or Decades,
+            // before exposing the connection to callers that can send messages.
+            if let packet = try? GameProtocolCodec.decodePacket(data) {
+              self.protocolVariant = packet.variant
               self.completeHandshake()
               self.sendRaw(GameProtocolCodec.acknowledgement(messageID: packet.messageID))
               if packet.packetCount == 1,
-                let object = GameProtocolCodec.decodeJSONPayload(packet.payload)
+                let object = GameProtocolCodec.decodeJSONPayload(
+                  packet.payload, variant: packet.variant)
               {
                 self.lastMessage = object
+                self.handleProtocolMessage(object)
               }
             }
           }
@@ -254,6 +264,32 @@ import Foundation
             self.receive(on: receivingConnection)
           }
         }
+      }
+    }
+
+    private func handleProtocolMessage(_ message: [String: Any]) {
+      switch message["TypeString"] as? String {
+      case "SessionStateMessage":
+        send(type: "ClientRequestPlayerIDMessage", fields: ["UID": deviceUID])
+      case "AssignPlayerIDAndSlotMessage":
+        send(
+          type: "DeviceInfoMessage",
+          fields: [
+            "Response": 10,
+            "DeviceSize": 2,
+            "DeviceOS": 1,
+            "DeviceModel": "iPhone",
+            "DeviceType": "Handheld",
+            "DeviceUID": deviceUID,
+            "DeviceOperatingSystem": "iOS",
+          ])
+        send(type: "KnowledgeIsPower.ClientRequestAvatarStatusMessage")
+      case "ResourceRequirementsMessage":
+        if let requirements = message["Requirements"] as? [[String: Any]], requirements.isEmpty {
+          send(type: "AllResourcesReceivedMessage", fields: ["Requirements": requirements])
+        }
+      default:
+        break
       }
     }
   }

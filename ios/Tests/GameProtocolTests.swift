@@ -39,6 +39,20 @@ final class GameProtocolTests: XCTestCase {
     XCTAssertEqual(packets.count, 3)
     XCTAssertEqual(try GameProtocolCodec.decodePacket(packets[2]).packetIndex, 2)
   }
+
+  func testDecadesJSONRoundTripUsesDecadesMagic() throws {
+    let packets = try GameProtocolCodec.encodeJSON(
+      ["TypeString": "Test"], messageID: 11, variant: .decades)
+
+    XCTAssertEqual(Array(packets[0].prefix(2)), [0xc1, 0x48])
+    let decoded = try GameProtocolCodec.decodePacket(packets[0])
+    XCTAssertEqual(decoded.variant, .decades)
+    XCTAssertEqual(Array(decoded.payload.prefix(2)), [0xa3, 0xd3])
+    XCTAssertEqual(
+      GameProtocolCodec.decodeJSONPayload(decoded.payload, variant: decoded.variant)?[
+        "TypeString"] as? String,
+      "Test")
+  }
 }
 
 extension GameProtocolTests {
