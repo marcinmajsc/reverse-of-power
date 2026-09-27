@@ -96,7 +96,7 @@ import Foundation
       isConnecting = true
       connection.stateUpdateHandler = { [weak self, weak connection] state in
         Task { @MainActor in
-          guard let self, connection === self.connection else { return }
+          guard let self, let connection, connection === self.connection else { return }
           switch state {
           case .ready:
             self.outgoingReady = true
