@@ -14,7 +14,12 @@ import Foundation
     @Published public private(set) var lastMessage: [String: Any] = [:]
     @Published public private(set) var errorMessage: String?
     private var connection: NWConnection?
+    private var listener: NWListener?
+    private var inboundConnections: [ObjectIdentifier: NWConnection] = [:]
     private var handshakeTask: Task<Void, Never>?
+    private var readinessTask: Task<Void, Never>?
+    private var outgoingReady = false
+    private var listenerReady = false
     private var messageID: Int32 = 1
     private let queue = DispatchQueue(label: "reverse-of-power.udp")
 
@@ -36,9 +41,55 @@ import Foundation
         return
       }
 
+      let listener: NWListener
+      do {
+        let listenerParameters = NWParameters.udp
+        listenerParameters.allowLocalEndpointReuse = true
+        listener = try NWListener(using: listenerParameters, on: localPort)
+      } catch {
+        errorMessage = "Nie można nasłuchiwać na porcie 9060: \(error.localizedDescription)"
+        return
+      }
+
+      // PlayLink does not reply to the UDP source port. It sends all game traffic
+      // to the controller's fixed port 9060, sometimes from a port other than
+      // 9066. A separate listener is therefore required; a connected UDP socket
+      // silently filters those packets on iOS.
+      self.listener = listener
+      listener.stateUpdateHandler = { [weak self, weak listener] state in
+        Task { @MainActor in
+          guard let self, listener === self.listener else { return }
+          switch state {
+          case .ready:
+            self.listenerReady = true
+            self.errorMessage = nil
+            self.startHandshakeIfReady()
+          case .waiting(let error):
+            self.errorMessage =
+              "Oczekiwanie na dostęp do sieci lokalnej: \(error.localizedDescription)"
+          case .failed(let error):
+            self.failConnection(error.localizedDescription)
+          case .cancelled:
+            self.listenerReady = false
+          default:
+            break
+          }
+        }
+      }
+      listener.newConnectionHandler = { [weak self] inbound in
+        Task { @MainActor [weak self] in
+          guard let self, self.listener != nil else {
+            inbound.cancel()
+            return
+          }
+          self.inboundConnections[ObjectIdentifier(inbound)] = inbound
+          inbound.start(queue: self.queue)
+          self.receive(on: inbound)
+        }
+      }
+      listener.start(queue: queue)
+
       let parameters = NWParameters.udp
-      parameters.allowLocalEndpointReuse = true
-      parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.any), port: localPort)
       let connection = NWConnection(
         host: NWEndpoint.Host(address), port: remotePort, using: parameters)
       self.connection = connection
@@ -48,11 +99,16 @@ import Foundation
           guard let self, connection === self.connection else { return }
           switch state {
           case .ready:
-            self.receive()
-            self.startHandshake()
+            self.outgoingReady = true
+            self.errorMessage = nil
+            self.receive(on: connection)
+            self.startHandshakeIfReady()
           case .waiting(let error):
-            self.failConnection(
-              "Nie można uzyskać dostępu do sieci lokalnej: \(error.localizedDescription)")
+            // The first local-network access prompt temporarily puts an
+            // NWConnection into .waiting. Keep it alive so accepting the prompt
+            // can move the same connection to .ready.
+            self.errorMessage =
+              "Oczekiwanie na dostęp do sieci lokalnej: \(error.localizedDescription)"
           case .failed(let error):
             self.failConnection(error.localizedDescription)
           case .cancelled:
@@ -64,14 +120,33 @@ import Foundation
         }
       }
       connection.start(queue: queue)
+      readinessTask = Task { [weak self] in
+        try? await Task.sleep(for: .seconds(15))
+        guard !Task.isCancelled, let self, self.isConnecting,
+          !self.outgoingReady || !self.listenerReady
+        else { return }
+        self.failConnection("Nie można uzyskać dostępu do sieci lokalnej.")
+      }
     }
 
     public func disconnect() {
+      readinessTask?.cancel()
+      readinessTask = nil
       handshakeTask?.cancel()
       handshakeTask = nil
       connection?.stateUpdateHandler = nil
       connection?.cancel()
       connection = nil
+      listener?.stateUpdateHandler = nil
+      listener?.newConnectionHandler = nil
+      listener?.cancel()
+      listener = nil
+      for inboundConnection in inboundConnections.values {
+        inboundConnection.cancel()
+      }
+      inboundConnections.removeAll()
+      outgoingReady = false
+      listenerReady = false
       isConnecting = false
       isConnected = false
     }
@@ -93,7 +168,10 @@ import Foundation
       }
     }
 
-    private func startHandshake() {
+    private func startHandshakeIfReady() {
+      guard outgoingReady, listenerReady, handshakeTask == nil else { return }
+      readinessTask?.cancel()
+      readinessTask = nil
       handshakeTask?.cancel()
       handshakeTask = Task { [weak self] in
         guard let self else { return }
@@ -143,12 +221,18 @@ import Foundation
       #endif
     }
 
-    private func receive() {
-      connection?.receiveMessage { [weak self] data, _, _, error in
+    private func receive(on receivingConnection: NWConnection) {
+      receivingConnection.receiveMessage {
+        [weak self, weak receivingConnection] data, _, _, error in
         Task { @MainActor [weak self] in
-          guard let self else { return }
+          guard let self, let receivingConnection else { return }
           if let error {
-            self.failConnection(error.localizedDescription)
+            if receivingConnection === self.connection {
+              self.failConnection(error.localizedDescription)
+            } else {
+              self.inboundConnections.removeValue(forKey: ObjectIdentifier(receivingConnection))
+              receivingConnection.cancel()
+            }
             return
           }
           if let data {
@@ -164,7 +248,11 @@ import Foundation
               }
             }
           }
-          if self.connection != nil { self.receive() }
+          if receivingConnection === self.connection
+            || self.inboundConnections[ObjectIdentifier(receivingConnection)] != nil
+          {
+            self.receive(on: receivingConnection)
+          }
         }
       }
     }
